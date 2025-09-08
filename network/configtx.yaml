@@ -1,0 +1,160 @@
+Organizations:
+  - &OrdererOrg
+      Name: OrdererOrg
+      ID: OrdererMSP
+      MSPDir: crypto-config/ordererOrganizations/example.com/msp
+      Policies:
+        Readers:
+          Type: Signature
+          Rule: "OR('OrdererMSP.member')"
+        Writers:
+          Type: Signature
+          Rule: "OR('OrdererMSP.member')"
+        Admins:
+          Type: Signature
+          Rule: "OR('OrdererMSP.admin')"
+      OrdererEndpoints:
+        - orderer.example.com:7050
+
+  - &CertOrg
+      Name: CertOrgMSP
+      ID: CertOrgMSP
+      MSPDir: crypto-config/peerOrganizations/cert.example.com/msp
+      Policies:
+        Readers:
+          Type: Signature
+          Rule: "OR('CertOrgMSP.admin', 'CertOrgMSP.peer', 'CertOrgMSP.client')"
+        Writers:
+          Type: Signature
+          Rule: "OR('CertOrgMSP.admin', 'CertOrgMSP.client')"
+        Admins:
+          Type: Signature
+          Rule: "OR('CertOrgMSP.admin')"
+        Endorsement:
+          Type: Signature
+          Rule: "OR('CertOrgMSP.peer')"
+      AnchorPeers:
+        - Host: peer0.cert.example.com
+          Port: 7051
+
+  - &TestOrg
+      Name: TestOrgMSP
+      ID: TestOrgMSP
+      MSPDir: crypto-config/peerOrganizations/test.example.com/msp
+      Policies:
+        Readers:
+          Type: Signature
+          Rule: "OR('TestOrgMSP.admin', 'TestOrgMSP.peer', 'TestOrgMSP.client')"
+        Writers:
+          Type: Signature
+          Rule: "OR('TestOrgMSP.admin', 'TestOrgMSP.client')"
+        Admins:
+          Type: Signature
+          Rule: "OR('TestOrgMSP.admin')"
+        Endorsement:
+          Type: Signature
+          Rule: "OR('TestOrgMSP.peer')"
+      AnchorPeers:
+        - Host: peer0.test.example.com
+          Port: 9051
+
+Capabilities:
+  Channel: &ChannelCapabilities
+    V2_0: true
+  Orderer: &OrdererCapabilities
+    V2_0: true
+  Application: &ApplicationCapabilities
+    V2_0: true
+
+Application: &ApplicationDefaults
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    LifecycleEndorsement:
+      # 简化生命周期背书策略，只需一个组织的背书
+      Type: ImplicitMeta
+      Rule: "ANY Endorsement"
+    Endorsement:
+      # 关键修改：将多数背书改为任一组织背书，适合测试环境
+      Type: ImplicitMeta
+      Rule: "ANY Endorsement"
+  Capabilities:
+    <<: *ApplicationCapabilities
+
+Orderer: &OrdererDefaults
+  OrdererType: etcdraft
+  Addresses:
+    - orderer.example.com:7050
+  EtcdRaft:
+    Consenters:
+    - Host: orderer.example.com
+      Port: 7050
+      ClientTLSCert: crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
+      ServerTLSCert: crypto-config/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
+  BatchTimeout: 2s
+  BatchSize:
+    MaxMessageCount: 10
+    AbsoluteMaxBytes: 99 MB
+    PreferredMaxBytes: 512 KB
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    BlockValidation:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+
+Channel: &ChannelDefaults
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+  Capabilities:
+    <<: *ChannelCapabilities
+
+Profiles:
+  CertOrdererGenesis:
+    <<: *ChannelDefaults
+    Orderer:
+      <<: *OrdererDefaults
+      Organizations:
+        - *OrdererOrg
+      Capabilities:
+        <<: *OrdererCapabilities
+    Consortiums:
+      SampleConsortium:
+        Organizations:
+          - *CertOrg
+          - *TestOrg
+
+  CertChannel:
+    Consortium: SampleConsortium
+    <<: *ChannelDefaults
+    Application:
+      <<: *ApplicationDefaults
+      Organizations:
+        - *CertOrg
+        - *TestOrg
+      Capabilities:
+        <<: *ApplicationCapabilities

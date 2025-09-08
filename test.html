@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>计量证书区块链溯源防伪系统</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .animate-fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+        
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+        
+        .status-draft {
+            background: rgb(254, 249, 195);
+            color: rgb(146, 64, 14);
+            border-color: rgb(253, 224, 71);
+        }
+        
+        .status-issued {
+            background: rgb(220, 252, 231);
+            color: rgb(22, 101, 52);
+            border-color: rgb(34, 197, 94);
+        }
+        
+        .status-revoked {
+            background: rgb(254, 226, 226);
+            color: rgb(153, 27, 27);
+            border-color: rgb(248, 113, 113);
+        }
+
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gray-50">
+    <!-- 加载提示 -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center" style="display: none;">
+        <div class="bg-white rounded-lg p-6 flex items-center gap-3">
+            <i class="fas fa-spinner fa-spin text-blue-600"></i>
+            <span>加载中...</span>
+        </div>
+    </div>
+
+    <!-- 错误提示 -->
+    <div id="errorToast" class="fixed top-4 right-4 bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg z-40" style="display: none;">
+        <div class="flex items-center gap-2">
+            <i class="fas fa-exclamation-circle"></i>
+            <span id="errorMessage"></span>
+        </div>
+    </div>
+
+    <!-- 成功提示 -->
+    <div id="successToast" class="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-40" style="display: none;">
+        <div class="flex items-center gap-2">
+            <i class="fas fa-check-circle"></i>
+            <span id="successMessage"></span>
+        </div>
+    </div>
+
+    <div class="container mx-auto px-4 py-8" id="app">
+        <!-- 证书列表视图 -->
+        <div id="listView" class="space-y-6">
+            <!-- 页面头部 -->
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-900">计量证书管理</h1>
+                    <p class="text-gray-600 mt-1">基于区块链的证书溯源防伪系统</p>
+                </div>
+                <button onclick="showCreateView()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-all duration-200 shadow-lg hover:shadow-xl">
+                    <i class="fas fa-plus"></i>
+                    创建证书
+                </button>
+            </div>
+
+            <!-- 搜索和筛选 -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div class="flex gap-4">
+                    <div class="flex-1 relative">
+                        <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                        <input type="text" id="searchInput" placeholder="搜索证书编号或送检单位..." 
+                               class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                               oninput="filterCertificates()">
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-filter text-gray-400"></i>
+                        <select id="statusFilter" onchange="filterCertificates()" class="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="">全部状态</option>
+                            <option value="draft">草稿</option>
+                            <option value="issued">已签发</option>
+                            <option value="revoked">已撤销</option>
+                        </select>
+                    </div>
+                    <button onclick="loadCertificates()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg transition-colors duration-200">
+                        <i class="fas fa-sync-alt"></i>
+                        刷新
+                    </button>
+                </div>
+            </div>
+
+            <!-- 证书网格 -->
+            <div id="certificatesGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- 证书卡片将在这里动态生成 -->
+            </div>
+
+            <!-- 空状态 -->
+            <div id="emptyState" class="text-center py-12" style="display: none;">
+                <i class="fas fa-file-alt text-6xl text-gray-400 mb-4"></i>
+                <h3 class="text-lg font-medium text-gray-900 mb-2">暂无证书</h3>
+                <p class="text-gray-600">开始创建您的第一个证书</p>
+            </div>
+        </div>
+
+        <!-- 证书详情视图 -->
+        <div id="detailView" class="space-y-6" style="display: none;">
+            <div class="flex items-center gap-4">
+                <button onclick="showListView()" class="text-gray-600 hover:text-gray-900 transition-colors">
+                    <i class="fas fa-arrow-left"></i> 返回列表
+                </button>
+                <h1 class="text-2xl font-bold text-gray-900">证书详情</h1>
+                <div id="detailStatusBadge"></div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- 主要信息 -->
+                <div class="lg:col-span-2 space-y-6">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                        <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                            <i class="fas fa-file-alt"></i>
+                            基本信息
+                        </h2>
+                        <div id="certificateInfo" class="grid grid-cols-2 gap-4">
+                            <!-- 证书信息将在这里动态生成 -->
+                        </div>
+                    </div>
+
+                    <!-- 测试数据 -->
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                        <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                            <i class="fas fa-chart-line"></i>
+                            测试数据
+                        </h2>
+                        <div class="overflow-x-auto">
+                            <table id="testDataTable" class="w-full text-sm">
+                                <thead>
+                                    <tr class="border-b border-gray-200">
+                                        <th class="text-left py-2 text-gray-700 font-medium">参数</th>
+                                        <th class="text-left py-2 text-gray-700 font-medium">测量值</th>
+                                        <th class="text-left py-2 text-gray-700 font-medium">单位</th>
+                                        <th class="text-left py-2 text-gray-700 font-medium">不确定度</th>
+                                        <th class="text-left py-2 text-gray-700 font-medium">方法</th>
+                                        <th class="text-left py-2 text-gray-700 font-medium">设备</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="testDataBody">
+                                    <!-- 测试数据将在这里动态生成 -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 侧边栏 -->
+                <div class="space-y-6">
+                    <!-- 区块链信息 -->
+                    <div class="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-200 p-6">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                            <i class="fas fa-shield-alt text-blue-600"></i>
+                            区块链验证
+                        </h3>
+                        <div class="space-y-3">
+                            <div class="flex items-center gap-2">
+                                <i class="fas fa-fingerprint text-gray-600"></i>
+                                <span class="text-sm text-gray-600">哈希: </span>
+                                <span id="certHash" class="text-sm font-mono text-gray-900 truncate"></span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <i class="fas fa-clock text-gray-600"></i>
+                                <span class="text-sm text-gray-600">上链时间: </span>
+                                <span id="chainTime" class="text-sm text-gray-900"></span>
+                            </div>
+                            <div class="bg-green-100 border border-green-200 rounded-lg p-3 text-center">
+                                <i class="fas fa-check-circle text-green-600 mb-1"></i>
+                                <div class="text-sm font-medium text-green-800">链上验证通过</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 操作按钮 -->
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">操作</h3>
+                        <div id="actionButtons" class="space-y-3">
+                            <!-- 操作按钮将在这里动态生成 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 创建证书视图 -->
+        <div id="createView" class="space-y-6" style="display: none;">
+            <div class="flex items-center gap-4">
+                <button onclick="showListView()" class="text-gray-600 hover:text-gray-900 transition-colors">
+                    <i class="fas fa-arrow-left"></i> 返回列表
+                </button>
+                <h1 class="text-2xl font-bold text-gray-900">创建证书</h1>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <form id="createForm">
+                    <div class="grid grid-cols-2 gap-6 mb-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">证书编号 *</label>
+                            <input type="text" id="certificateNo" required 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                   placeholder="CERT-2025-XXX">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">送检单位 *</label>
+                            <input type="text" id="testUnit" required 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                   placeholder="输入送检单位名称">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">测试日期 *</label>
+                            <input type="date" id="testDate" required 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">有效期至 *</label>
+                            <input type="date" id="validUntil" required 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">检验机构 *</label>
+                            <input type="text" id="inspectionOrg" required 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                   placeholder="输入检验机构名称">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">检验员 *</label>
+                            <input type="text" id="inspector" required 
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                   placeholder="输入检验员姓名">
+                        </div>
+                    </div>
+
+                    <!-- 测试数据 -->
+                    <div class="mb-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg font-semibold text-gray-900">测试数据</h3>
+                            <button type="button" onclick="addTestDataRow()" 
+                                    class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm transition-colors duration-200">
+                                <i class="fas fa-plus"></i> 添加行
+                            </button>
+                        </div>
+                        
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="border-b border-gray-200">
+                                        <th class="text-left py-2 text-gray-700 font-medium">参数</th>
+                                        <th class="text-left py-2 text-gray-700 font-medium">测量值</th>
+                                        <th class="text-left py-2 text-gray-700 font-medium">单位</th>
+                                        <th class="text-left py-2 text-gray-700 font-medium">不确定度</th>
+                                        <th class="text-left py-2 text-gray-700 font-medium">方法</th>
+                                        <th class="text-left py-2 text-gray-700 font-medium">设备</th>
+                                        <th class="text-left py-2 text-gray-700 font-medium">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="testDataFormBody">
+                                    <tr>
+                                        <td class="py-2 pr-2">
+                                            <input type="text" class="test-parameter w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="参数名称" required>
+                                        </td>
+                                        <td class="py-2 pr-2">
+                                            <input type="number" step="0.01" class="test-value w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="数值" required>
+                                        </td>
+                                        <td class="py-2 pr-2">
+                                            <input type="text" class="test-unit w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="单位" required>
+                                        </td>
+                                        <td class="py-2 pr-2">
+                                            <input type="number" step="0.01" class="test-uncertainty w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="不确定度" required>
+                                        </td>
+                                        <td class="py-2 pr-2">
+                                            <input type="text" class="test-method w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="测试方法" required>
+                                        </td>
+                                        <td class="py-2 pr-2">
+                                            <input type="text" class="test-equipment w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="测试设备" required>
+                                        </td>
+                                        <td class="py-2">
+                                            <button type="button" onclick="removeTestDataRow(this)" 
+                                                    class="text-red-600 hover:text-red-800 px-2 py-1 text-sm transition-colors duration-200">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition-colors duration-200">
+                            <i class="fas fa-save"></i> 创建证书
+                        </button>
+                        <button type="button" onclick="showListView()" class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-6 py-2 rounded-lg transition-colors duration-200">
+                            <i class="fas fa-times"></i> 取消
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 历史记录视图 -->
+        <div id="historyView" class="space-y-6" style="display: none;">
+            <div class="flex items-center gap-4">
+                <button onclick="showDetailView()" class="text-gray-600 hover:text-gray-900 transition-colors">
+                    <i class="fas fa-arrow-left"></i> 返回详情
+                </button>
+                <h1 class="text-2xl font-bold text-gray-900">证书历史记录</h1>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <h2 id="historyTitle" class="text-lg font-semibold text-gray-900 mb-4">区块链历史</h2>
+                <div id="historyContent" class="space-y-4">
+                    <!-- 历史记录将在这里动态生成 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // API 配置
+        const API_BASE = 'http://localhost:8080/api/v1';
+        
+        // 全局变量
+        let certificates = [];
+        let filteredCertificates = [];
+        let currentCertificate = null;
+        let currentView = 'list';
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            loadCertificates();
+            
+            // 绑定表单提交事件
+            document.getElementById('createForm').addEventListener('submit', handleCreateCertificate);
+        });
+
+        // API 调用函数
+        async function apiCall(url, options = {}) {
+            showLoading();
+            try {
+                const response = await fetch(API_BASE + url, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || `HTTP ${response.status}`);
+                }
+                
+                return data;
+            } catch (error) {
+                showError(error.message);
+                throw error;
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 加载所有证书
+        async function loadCertificates() {
+            try {
+                certificates = await apiCall('/certificates');
+                filteredCertificates = [...certificates];
+                renderCertificates();
+            } catch (error) {
+                console.error('加载证书失败:', error);
+            }
+        }
+
+        // 创建证书
+        async function createCertificate(data) {
+            try {
+                const result = await apiCall('/certificates', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                showSuccess('证书创建成功');
+                return result;
+            } catch (error) {
+                console.error('创建证书失败:', error);
+                throw error;
+            }
+        }
+
+        // 获取证书详情
+        async function getCertificateById(id) {
+            try {
+                return await apiCall(`/certificates/${id}`);
+            } catch (error) {
+                console.error('获取证书详情失败:', error);
+                throw error;
+            }
+        }
+
+        // 签发证书
+        async function issueCertificate(id, operator) {
+            try {
+                await apiCall(`/certificates/${id}/issue`, {
+                    method: 'POST',
+                    body: JSON.stringify({ operator })
+                });
+                showSuccess('证书签发成功');
+                await loadCertificates();
+                if (currentCertificate && currentCertificate.id === id) {
+                    currentCertificate = await getCertificateById(id);
+                    renderCertificateDetail();
+                }
+            } catch (error) {
+                console.error('签发证书失败:', error);
+            }
+        }
+
+        // 撤销证书
+        async function revokeCertificate(id, operator, reason) {
+            try {
+                await apiCall(`/certificates/${id}/revoke`, {
+                    method: 'POST',
+                    body: JSON.stringify({ operator, reason })
+                });
+                showSuccess('证书撤销成功');
+                await loadCertificates();
+                if (currentCertificate && currentCertificate.id === id) {
+                    currentCertificate = await getCertificateById(id);
+                    renderCertificateDetail();
+                }
+            } catch (error) {
+                console.error('撤销证书失败:', error);
+            }
+        }
+
+        // 获取证书历史
+        async function getCertificateHistory(id) {
+            try {
+                return await apiCall(`/certificates/${id}/history`);
+            } catch (error) {
+                console.error('获取证书历史失败:', error);
+                throw error;
+            }
+        }
+
+        // 视图切换函数
+        function showListView() {
+            hideAllViews();
+            document.getElementById('listView').style.display = 'block';
+            currentView = 'list';
+        }
+
+        async function showDetailView(certificateId = null) {
+            if (certificateId) {
+                try {
+                    currentCertificate = await getCertificateById(certificateId);
+                } catch (error) {
+                    return;
+                }
+            }
+            hideAllViews();
+            document.getElementById('detailView').style.display = 'block';
+            currentView = 'detail';
+            renderCertificateDetail();
+        }
+
+        function showCreateView() {
+            hideAllViews();
+            document.getElementById('createView').style.display = 'block';
+            currentView = 'create';
+            // 设置默认日期
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('testDate').value = today;
+            const nextYear = new Date();
+            nextYear.setFullYear(nextYear.getFullYear() + 1);
+            document.getElementById('validUntil').value = nextYear.toISOString().split('T')[0];
+        }
+
+        async function showHistoryView() {
+            if (!currentCertificate) return;
+            
+            hideAllViews();
+            document.getElementById('historyView').style.display = 'block';
+            currentView = 'history';
+            document.getElementById('historyTitle').textContent = `${currentCertificate.certificateNo} - 区块链历史`;
+            
+            try {
+                const history = await getCertificateHistory(currentCertificate.id);
+                renderCertificateHistory(history);
+            } catch (error) {
+                document.getElementById('historyContent').innerHTML = '<p class="text-gray-500">无法加载历史记录</p>';
+            }
+        }
+
+        function hideAllViews() {
+            document.getElementById('listView').style.display = 'none';
+            document.getElementById('detailView').style.display = 'none';
+            document.getElementById('createView').style.display = 'none';
+            document.getElementById('historyView').style.display = 'none';
+        }
+
+        // 渲染证书列表
+        function renderCertificates() {
+            const grid = document.getElementById('certificatesGrid');
+            const emptyState = document.getElementById('emptyState');
+            
+            if (filteredCertificates.length === 0) {
+                grid.innerHTML = '';
+                emptyState.style.display = 'block';
+                return;
+            }
+            
+            emptyState.style.display = 'none';
+            
+            const html = filteredCertificates.map((cert, index) => `
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 hover:shadow-lg transition-all duration-300 overflow-hidden group card-hover animate-fade-in"
+                     style="animation-delay: ${index * 100}ms">
+                    <div class="p-6">
+                        <div class="flex items-start justify-between mb-4">
+                            <div>
+                                <h3 class="font-semibold text-lg text-gray-900 mb-1">${cert.certificateNo}</h3>
+                                <p class="text-gray-600 text-sm">${cert.testUnit}</p>
+                            </div>
+                            ${getStatusBadge(cert.status)}
+                        </div>
+
+                        <div class="space-y-3 mb-4">
+                            <div class="flex items-center gap-2 text-sm text-gray-600">
+                                <i class="fas fa-building"></i>
+                                <span>${cert.inspectionOrg}</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-sm text-gray-600">
+                                <i class="fas fa-user"></i>
+                                <span>检验员: ${cert.inspector}</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-sm text-gray-600">
+                                <i class="fas fa-calendar"></i>
+                                <span>测试日期: ${formatDate(cert.testDate)}</span>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-2">
+                            <button onclick="showDetailView('${cert.id}')" 
+                                    class="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-600 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center justify-center gap-1">
+                                <i class="fas fa-eye"></i>
+                                查看
+                            </button>
+                            ${cert.status === 'draft' ? `
+                                <button onclick="promptIssueCertificate('${cert.id}')" 
+                                        class="flex-1 bg-green-50 hover:bg-green-100 text-green-600 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center justify-center gap-1">
+                                    <i class="fas fa-check-circle"></i>
+                                    签发
+                                </button>
+                            ` : ''}
+                            ${cert.status === 'issued' ? `
+                                <button onclick="promptRevokeCertificate('${cert.id}')" 
+                                        class="flex-1 bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center justify-center gap-1">
+                                    <i class="fas fa-times-circle"></i>
+                                    撤销
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            
+            grid.innerHTML = html;
+        }
+
+        // 渲染证书详情
+        function renderCertificateDetail() {
+            if (!currentCertificate) return;
+            
+            const cert = currentCertificate;
+            
+            // 状态徽章
+            document.getElementById('detailStatusBadge').innerHTML = getStatusBadge(cert.status);
+            
+            // 基本信息
+            document.getElementById('certificateInfo').innerHTML = `
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">证书编号</label>
+                    <p class="text-gray-900 font-mono">${cert.certificateNo}</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">送检单位</label>
+                    <p class="text-gray-900">${cert.testUnit}</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">测试日期</label>
+                    <p class="text-gray-900">${formatDate(cert.testDate)}</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">有效期至</label>
+                    <p class="text-gray-900">${formatDate(cert.validUntil)}</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">检验机构</label>
+                    <p class="text-gray-900">${cert.inspectionOrg}</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">检验员</label>
+                    <p class="text-gray-900">${cert.inspector}</p>
+                </div>
+            `;
+            
+            // 测试数据
+            document.getElementById('testDataBody').innerHTML = cert.testData.map(data => `
+                <tr class="border-b border-gray-100">
+                    <td class="py-2 text-gray-900">${data.parameter}</td>
+                    <td class="py-2 text-gray-900 font-mono">${data.measuredValue}</td>
+                    <td class="py-2 text-gray-900">${data.unit}</td>
+                    <td class="py-2 text-gray-900 font-mono">±${data.uncertainty}</td>
+                    <td class="py-2 text-gray-900">${data.method}</td>
+                    <td class="py-2 text-gray-900">${data.equipment}</td>
+                </tr>
+            `).join('');
+            
+            // 区块链信息
+            document.getElementById('certHash').textContent = cert.hash || '0x1a2b3c...';
+            document.getElementById('chainTime').textContent = formatDate(cert.createdAt);
+            
+            // 操作按钮
+            let actionButtons = `
+                <button onclick="showHistoryView()" 
+                        class="w-full bg-gray-50 hover:bg-gray-100 text-gray-700 px-4 py-2 rounded-lg transition-colors duration-200 flex items-center gap-2">
+                    <i class="fas fa-history"></i>
+                    查看历史记录
+                </button>
+                <button onclick="downloadCertificate()" class="w-full bg-gray-50 hover:bg-gray-100 text-gray-700 px-4 py-2 rounded-lg transition-colors duration-200 flex items-center gap-2">
+                    <i class="fas fa-download"></i>
+                    下载证书
+                </button>
+            `;
+            
+            if (cert.status === 'draft') {
+                actionButtons += `
+                    <button onclick="promptIssueCertificate('${cert.id}')" 
+                            class="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors duration-200 flex items-center gap-2">
+                        <i class="fas fa-check-circle"></i>
+                        签发证书
+                    </button>
+                `;
+            }
+            
+            if (cert.status === 'issued') {
+                actionButtons += `
+                    <button onclick="promptRevokeCertificate('${cert.id}')" 
+                            class="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors duration-200 flex items-center gap-2">
+                        <i class="fas fa-times-circle"></i>
+                        撤销证书
+                    </button>
+                `;
+            }
+            
+            document.getElementById('actionButtons').innerHTML = actionButtons;
+        }
+
+        // 渲染证书历史
+        function renderCertificateHistory(history) {
+            const content = document.getElementById('historyContent');
+            
+            if (!history || history.length === 0) {
+                content.innerHTML = '<p class="text-gray-500">暂无历史记录</p>';
+                return;
+            }
+            
+            const html = history.map(record => {
+                const iconMap = {
+                    'CREATED': 'fas fa-plus',
+                    'UPDATED': 'fas fa-edit',
+                    'ISSUED': 'fas fa-check-circle',
+                    'REVOKED': 'fas fa-times-circle'
+                };
+                
+                const colorMap = {
+                    'CREATED': 'bg-gray-50 border-gray-200',
+                    'UPDATED': 'bg-blue-50 border-blue-200',
+                    'ISSUED': 'bg-green-50 border-green-200',
+                    'REVOKED': 'bg-red-50 border-red-200'
+                };
+                
+                const action = record.value.traceHistory?.slice(-1)[0]?.action || 'UNKNOWN';
+                
+                return `
+                    <div class="flex items-start gap-4 p-4 ${colorMap[action] || 'bg-gray-50 border-gray-200'} border rounded-lg">
+                        <div class="w-8 h-8 bg-white rounded-full flex items-center justify-center border">
+                            <i class="${iconMap[action] || 'fas fa-question'}"></i>
+                        </div>
+                        <div class="flex-1">
+                            <div class="flex items-center justify-between mb-1">
+                                <h4 class="font-medium text-gray-900">${getActionText(action)}</h4>
+                                <span class="text-sm text-gray-500">${formatDateTime(record.timestamp)}</span>
+                            </div>
+                            <p class="text-sm text-gray-600">交易ID：${record.txId}</p>
+                            ${record.isDelete ? '<p class="text-sm text-red-600">记录已删除</p>' : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            content.innerHTML = html;
+        }
+
+        // 工具函数
+        function getStatusBadge(status) {
+            const statusConfig = {
+                draft: { 
+                    class: 'status-draft', 
+                    icon: 'fas fa-edit', 
+                    text: '草稿' 
+                },
+                issued: { 
+                    class: 'status-issued', 
+                    icon: 'fas fa-check-circle', 
+                    text: '已签发' 
+                },
+                revoked: { 
+                    class: 'status-revoked', 
+                    icon: 'fas fa-times-circle', 
+                    text: '已撤销' 
+                }
+            };
+            
+            const config = statusConfig[status] || statusConfig.draft;
+            
+            return `
+                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border ${config.class}">
+                    <i class="${config.icon}"></i>
+                    ${config.text}
+                </span>
+            `;
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return '';
+            return new Date(dateString).toLocaleDateString('zh-CN');
+        }
+
+        function formatDateTime(dateString) {
+            if (!dateString) return '';
+            return new Date(dateString).toLocaleString('zh-CN');
+        }
+
+        function getActionText(action) {
+            const actionMap = {
+                'CREATED': '证书已创建',
+                'UPDATED': '证书已更新',
+                'ISSUED': '证书已签发',
+                'REVOKED': '证书已撤销'
+            };
+            return actionMap[action] || action;
+        }
+
+        // 搜索和筛选
+        function filterCertificates() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const statusFilter = document.getElementById('statusFilter').value;
+            
+            filteredCertificates = certificates.filter(cert => {
+                const matchesSearch = cert.certificateNo.toLowerCase().includes(searchTerm) ||
+                                     cert.testUnit.toLowerCase().includes(searchTerm);
+                const matchesStatus = !statusFilter || cert.status === statusFilter;
+                return matchesSearch && matchesStatus;
+            });
+            
+            renderCertificates();
+        }
+
+        // 证书操作
+        function promptIssueCertificate(certId) {
+            const operator = prompt('请输入操作员姓名:');
+            if (operator) {
+                issueCertificate(certId, operator);
+            }
+        }
+
+        function promptRevokeCertificate(certId) {
+            const operator = prompt('请输入操作员姓名:');
+            if (!operator) return;
+            
+            const reason = prompt('请输入撤销原因:');
+            if (reason) {
+                revokeCertificate(certId, operator, reason);
+            }
+        }
+
+        function downloadCertificate() {
+            showSuccess('证书下载功能开发中...');
+        }
+
+        // 测试数据行操作
+        function addTestDataRow() {
+            const tbody = document.getElementById('testDataFormBody');
+            const newRow = document.createElement('tr');
+            newRow.innerHTML = `
+                <td class="py-2 pr-2">
+                    <input type="text" class="test-parameter w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="参数名称" required>
+                </td>
+                <td class="py-2 pr-2">
+                    <input type="number" step="0.01" class="test-value w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="数值" required>
+                </td>
+                <td class="py-2 pr-2">
+                    <input type="text" class="test-unit w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="单位" required>
+                </td>
+                <td class="py-2 pr-2">
+                    <input type="number" step="0.01" class="test-uncertainty w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="不确定度" required>
+                </td>
+                <td class="py-2 pr-2">
+                    <input type="text" class="test-method w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="测试方法" required>
+                </td>
+                <td class="py-2 pr-2">
+                    <input type="text" class="test-equipment w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="测试设备" required>
+                </td>
+                <td class="py-2">
+                    <button type="button" onclick="removeTestDataRow(this)" 
+                            class="text-red-600 hover:text-red-800 px-2 py-1 text-sm transition-colors duration-200">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(newRow);
+        }
+
+        function removeTestDataRow(button) {
+            const tbody = document.getElementById('testDataFormBody');
+            if (tbody.children.length > 1) {
+                button.closest('tr').remove();
+            }
+        }
+
+        // 创建证书表单处理
+        async function handleCreateCertificate(event) {
+            event.preventDefault();
+            
+            const testDataRows = document.querySelectorAll('#testDataFormBody tr');
+            const testData = [];
+            
+            testDataRows.forEach(row => {
+                const parameter = row.querySelector('.test-parameter').value;
+                const measuredValue = parseFloat(row.querySelector('.test-value').value);
+                const unit = row.querySelector('.test-unit').value;
+                const uncertainty = parseFloat(row.querySelector('.test-uncertainty').value);
+                const method = row.querySelector('.test-method').value;
+                const equipment = row.querySelector('.test-equipment').value;
+                
+                if (parameter) {
+                    testData.push({
+                        parameter,
+                        measuredValue: measuredValue || 0,
+                        unit,
+                        uncertainty: uncertainty || 0,
+                        method,
+                        equipment
+                    });
+                }
+            });
+            
+            const formData = {
+                certificateNo: document.getElementById('certificateNo').value,
+                testUnit: document.getElementById('testUnit').value,
+                testDate: document.getElementById('testDate').value,
+                inspectionOrg: document.getElementById('inspectionOrg').value,
+                inspector: document.getElementById('inspector').value,
+                validUntil: document.getElementById('validUntil').value,
+                createdBy: 'system', // 可以改为当前用户
+                testData
+            };
+            
+            try {
+                await createCertificate(formData);
+                
+                // 重置表单
+                event.target.reset();
+                
+                // 重置测试数据表格到只有一行
+                const tbody = document.getElementById('testDataFormBody');
+                tbody.innerHTML = `
+                    <tr>
+                        <td class="py-2 pr-2">
+                            <input type="text" class="test-parameter w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="参数名称" required>
+                        </td>
+                        <td class="py-2 pr-2">
+                            <input type="number" step="0.01" class="test-value w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="数值" required>
+                        </td>
+                        <td class="py-2 pr-2">
+                            <input type="text" class="test-unit w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="单位" required>
+                        </td>
+                        <td class="py-2 pr-2">
+                            <input type="number" step="0.01" class="test-uncertainty w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="不确定度" required>
+                        </td>
+                        <td class="py-2 pr-2">
+                            <input type="text" class="test-method w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="测试方法" required>
+                        </td>
+                        <td class="py-2 pr-2">
+                            <input type="text" class="test-equipment w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent" placeholder="测试设备" required>
+                        </td>
+                        <td class="py-2">
+                            <button type="button" onclick="removeTestDataRow(this)" 
+                                    class="text-red-600 hover:text-red-800 px-2 py-1 text-sm transition-colors duration-200">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+                
+                // 重新加载证书列表并返回列表视图
+                await loadCertificates();
+                showListView();
+            } catch (error) {
+                console.error('创建证书失败:', error);
+            }
+        }
+
+        // UI 反馈函数
+        function showLoading() {
+            document.getElementById('loadingOverlay').style.display = 'flex';
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }
+
+        function showError(message) {
+            const toast = document.getElementById('errorToast');
+            const messageEl = document.getElementById('errorMessage');
+            messageEl.textContent = message;
+            toast.style.display = 'block';
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 5000);
+        }
+
+        function showSuccess(message) {
+            const toast = document.getElementById('successToast');
+            const messageEl = document.getElementById('successMessage');
+            messageEl.textContent = message;
+            toast.style.display = 'block';
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
